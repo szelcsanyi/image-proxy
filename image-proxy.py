@@ -2,7 +2,7 @@
 
 __author__ = "Gabor Szelcsanyi - szelcsanyi.gabor@gmail.com"
 __license__ = "MIT"
-__version__ = "0.1"
+__version__ = "0.2"
 
 
 import datetime
@@ -118,6 +118,8 @@ class MainHandler(tornado.web.RequestHandler):
                     newsize = (int(image.size[0] * scale_with), height)
                 image = image.resize(newsize, Image.ANTIALIAS)
                 logger.info("Image scaled to: %dx%d" % (image.size[0], image.size[1]))
+                if image_format=='png' and image.mode == "CMYK":
+                    image = image.convert("RGB")
                 image.save(image_save_path + '/' + image_file_dir + '/' + image_file_name, format=image_format, optimize=True)
             else:
                 f = file
