@@ -15,7 +15,7 @@ The script will fetch a remote picture, scale it if required, store it on local 
 
 ## Requirements
 
-* Python 2.6, 2.7
+* Python 3.8
 * tornado
 * swirl
 * Pillow

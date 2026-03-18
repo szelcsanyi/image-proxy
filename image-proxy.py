@@ -2,19 +2,21 @@
 
 __author__ = "Gabor Szelcsanyi - szelcsanyi.gabor@gmail.com"
 __license__ = "MIT"
-__version__ = "0.2"
-
+__version__ = "0.3"
 
 import datetime
 import time
 import hashlib
-import urllib2
+import urllib3
 import sys
 import os
-import cStringIO
+#import cStringIO
+import io
 import resource
 
 from PIL import Image
+from PIL import ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 import tornado.httpserver
 import tornado.httpclient
@@ -28,20 +30,21 @@ from tornado.options import define, options
 
 import swirl
 
-image_save_path = '/web-data/share-proxy-pic'
+image_save_path = '/opt/ssl-proxy-pic'
 image_format = 'png'
 secret = '108ae6c6-9b27-11e4-96c1-3c970e5137c2'
-max_width = 800
-max_height = 600
+max_width = 1920
+max_height = 1080
 logger = None
 
 define("port", default=8081, help="run on the given port", type=int)
-
 
 class MainHandler(tornado.web.RequestHandler):
     global logger
 
     def get(self):
+        ref = self.request.headers.get('Referer')
+        logger.info("Request from: %s" % ref)
         try:
             url = self.get_argument('url')
             sign = self.get_argument('sign')
@@ -59,7 +62,7 @@ class MainHandler(tornado.web.RequestHandler):
             height = ''
 
         try:
-            calculated_md5 = str(hashlib.md5(secret + str(url) + str(width) + str(height)).hexdigest())
+            calculated_md5 = str(hashlib.md5("{}{}{}{}".format(secret, str(url), str(width), str(height)).encode('utf-8') ).hexdigest())
             if calculated_md5 != str(sign) and calculated_md5 != str('0') + str(sign) and calculated_md5 != str('00') + str(sign):
                 raise Exception
         except:
@@ -75,10 +78,10 @@ class MainHandler(tornado.web.RequestHandler):
         except:
             raise tornado.web.HTTPError(status_code=500, log_message='File search error ' + str(sys.exc_info()[0]) + ' - ' + str(sys.exc_info()[1]), reason='File search error')
 
-        self.get_image(url, width, height, image_file_dir, image_file_name)
+        self.get_image(url, width, height, image_file_dir, image_file_name, ref)
 
     @swirl.asynchronous
-    def get_image(self, url, width, height, image_file_dir, image_file_name):
+    def get_image(self, url, width, height, image_file_dir, image_file_name, ref):
         logger.info("Fetching url: %s" % url)
         http = tornado.httpclient.AsyncHTTPClient()
         response = tornado.httpclient.HTTPResponse
@@ -86,9 +89,9 @@ class MainHandler(tornado.web.RequestHandler):
             response = yield lambda cb: http.fetch(url, cb)
             logger.info('Response time: ' + str(response.request_time))
         except tornado.httpclient.HTTPError:
-            raise tornado.web.HTTPError(status_code=500, log_message='Failed to fetch ' + url, reason='Failed to fetch')
+            raise tornado.web.HTTPError(status_code=500, log_message='Failed to fetch %s Ref: %s' % (url,ref), reason='Failed to fetch')
         except Exception as e:
-            raise tornado.web.HTTPError(status_code=500, log_message='Failed to fetch ' + url, reason='Failed to fetch')
+            raise tornado.web.HTTPError(status_code=500, log_message='Failed to fetch %s Ref: %s' % (url,ref), reason='Failed to fetch')
 
         try:
             image = Image.open(response.buffer)
@@ -102,9 +105,9 @@ class MainHandler(tornado.web.RequestHandler):
             if not os.path.exists(image_save_path + '/' + image_file_dir):
                 logger.info('Creating directory: ' + image_file_dir)
                 os.makedirs(image_save_path + '/' + image_file_dir)
-                os.chmod(image_save_path + '/' + image_file_dir[:-4], 0755)
-                os.chmod(image_save_path + '/' + image_file_dir[:-2], 0755)
-                os.chmod(image_save_path + '/' + image_file_dir, 0755)
+                os.chmod(image_save_path + '/' + image_file_dir[:-4], 0o755)
+                os.chmod(image_save_path + '/' + image_file_dir[:-2], 0o755)
+                os.chmod(image_save_path + '/' + image_file_dir, 0o755)
 
             logger.info("Required: %dx%d" % (width, height))
             logger.info("Image is: %dx%d" % (image.size[0], image.size[1]))
@@ -122,19 +125,19 @@ class MainHandler(tornado.web.RequestHandler):
                     image = image.convert("RGB")
                 image.save(image_save_path + '/' + image_file_dir + '/' + image_file_name, format=image_format, optimize=True)
             else:
-                f = file
+                #f = file
                 f = open(image_save_path + '/' + image_file_dir + '/' + image_file_name, 'wb')
                 f.write(response.body)
                 f.close()
 
-            os.chmod(image_save_path + '/' + image_file_dir + '/' + image_file_name, 0444)
+            os.chmod(image_save_path + '/' + image_file_dir + '/' + image_file_name, 0o444)
             logger.info('Image saved. ' + image_file_name)
             self.do_serv(image_save_path + '/' + image_file_dir + '/' + image_file_name)
         except:
                 raise tornado.web.HTTPError(status_code=500, log_message='Image processing error! ' + str(sys.exc_info()[0]) + ' - ' + str(sys.exc_info()[1]), reason='Image processing error')
 
     def do_serv(self, path):
-        f = file
+        #f = file
         try:
             f = open(path, 'rb')
             imagedata = f.read()
@@ -148,14 +151,13 @@ class MainHandler(tornado.web.RequestHandler):
             if not f.closed:
                 f.close()
 
-
 def main():
     global logger
 
     try:
         resource.setrlimit(resource.RLIMIT_NOFILE, (15000, 15000))
     except:
-        print "Cannot increase ulimit"
+        print("Cannot increase ulimit")
 
     try:
         tornado.options.parse_command_line()
@@ -168,7 +170,8 @@ def main():
         http_server.listen(options.port)
         tornado.ioloop.IOLoop.instance().start()
     except Exception as e:
-        print "Error: %s", e
+        print("Error: %s", e)
 
 if __name__ == "__main__":
     main()
+
